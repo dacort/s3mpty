@@ -1,31 +1,14 @@
-package main
+package s3mpty
 
 import (
-	"flag"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
-
-var dryRun bool
-
-func init() {
-	const (
-		defaultDryRun = false
-	)
-	flag.BoolVar(&dryRun, "dryrun", defaultDryRun, "Display the operations that would be performed without actually running them.")
-
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-dryrun] <bucket_name>\n", os.Args[0])
-
-		flag.PrintDefaults()
-	}
-}
 
 func getBucketRegion(svc *s3.S3, bucket_name string) string {
 	input := &s3.GetBucketLocationInput{
@@ -48,20 +31,7 @@ func getBucketRegion(svc *s3.S3, bucket_name string) string {
 	return *result.LocationConstraint
 }
 
-func main() {
-	flag.Parse()
-	bucket_name := flag.Arg(0)
-	if bucket_name == "" {
-		fmt.Println("Error: must provide bucket name as first argument.")
-		flag.Usage()
-		os.Exit(1)
-	}
-	if flag.NArg() > 1 {
-		fmt.Println("Error: Only one command-line argument allowed, found: ", flag.Args())
-		flag.Usage()
-		os.Exit(1)
-	}
-
+func NewSession() *session.Session {
 	// We use SharedConfigState so we can make use of credential_process
 	// Note: This is potentially unsafe
 	sess := session.Must(session.NewSessionWithOptions(session.Options{
@@ -73,14 +43,22 @@ func main() {
 		log.Fatal("Could not load credentials", err)
 	}
 
+	return sess
+}
+
+func NewClient(sess *session.Session, bucket_name string) *s3.S3 {
 	region_name := aws.String(getBucketRegion(s3.New(sess), bucket_name))
 	svc := s3.New(sess, aws.NewConfig().WithRegion(*region_name))
+	return svc
+}
+
+func DeleteObjectsFromBucket(client *s3.S3, bucket_name string, dryRun bool) int {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket_name),
 	}
 
 	counter := 0
-	err = svc.ListObjectsV2Pages(input,
+	err := client.ListObjectsV2Pages(input,
 		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
 			counter += int(*page.KeyCount)
 
@@ -97,7 +75,7 @@ func main() {
 
 			}
 			if !dryRun {
-				svc.DeleteObjects(delete_input)
+				client.DeleteObjects(delete_input)
 			}
 
 			return lastPage
@@ -116,14 +94,18 @@ func main() {
 			// Message from an error.
 			fmt.Println(err.Error())
 		}
-		return
 	}
 
-	version_counter := 0
+	return counter
+}
+
+func DeleteVersionsFromBucket(client *s3.S3, bucket_name string, dryRun bool) int {
 	version_input := &s3.ListObjectVersionsInput{
 		Bucket: aws.String(bucket_name),
 	}
-	svc.ListObjectVersionsPages(version_input,
+
+	version_counter := 0
+	client.ListObjectVersionsPages(version_input,
 		func(page *s3.ListObjectVersionsOutput, lastPage bool) bool {
 
 			delete_input := &s3.DeleteObjectsInput{
@@ -133,22 +115,17 @@ func main() {
 			version_counter += len(page.DeleteMarkers)
 			for _, obj := range page.DeleteMarkers {
 				if dryRun {
-					fmt.Printf("(dryrun) delete version: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+					fmt.Printf("(dryrun) delete version: s3://%s%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
 				} else {
 					delete_input.Delete.Objects = append(delete_input.Delete.Objects, &s3.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
 				}
 			}
 			if !dryRun {
-				svc.DeleteObjects(delete_input)
+				client.DeleteObjects(delete_input)
 			}
 
 			return lastPage
 		})
 
-	if dryRun {
-		fmt.Println("(dryrun) Deleted", counter, "objects and", version_counter, "versions.")
-	} else {
-		fmt.Println("Deleted", counter, "objects and", version_counter, "versions.")
-	}
-
+	return version_counter
 }
