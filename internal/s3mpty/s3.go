@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 )
 
 func getBucketRegion(svc *s3.S3, bucket_name string) string {
@@ -46,7 +47,7 @@ func NewSession() *session.Session {
 	_, err := sess.Config.Credentials.Get()
 	if err != nil {
 		// handle error
-		log.Fatal("Could not load credentials", err)
+		log.Fatal("Could not load credentials: ", err)
 	}
 
 	return sess
@@ -58,7 +59,7 @@ func NewClient(sess *session.Session, bucket_name string) *s3.S3 {
 	return svc
 }
 
-func DeleteObjectsFromBucket(client *s3.S3, bucket_name string, dryRun bool) int {
+func DeleteObjectsFromBucket(client s3iface.S3API, bucket_name string, dryRun bool) int {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket_name),
 	}
@@ -81,7 +82,10 @@ func DeleteObjectsFromBucket(client *s3.S3, bucket_name string, dryRun bool) int
 
 			}
 			if !dryRun {
-				client.DeleteObjects(delete_input)
+				_, err := client.DeleteObjects(delete_input)
+				if err != nil {
+					log.Fatal("Could not delete objects: ", err)
+				}
 			}
 
 			return lastPage
@@ -105,7 +109,7 @@ func DeleteObjectsFromBucket(client *s3.S3, bucket_name string, dryRun bool) int
 	return counter
 }
 
-func DeleteVersionsFromBucket(client *s3.S3, bucket_name string, dryRun bool) int {
+func DeleteVersionsFromBucket(client s3iface.S3API, bucket_name string, dryRun bool) int {
 	version_input := &s3.ListObjectVersionsInput{
 		Bucket: aws.String(bucket_name),
 	}
@@ -135,7 +139,10 @@ func DeleteVersionsFromBucket(client *s3.S3, bucket_name string, dryRun bool) in
 				}
 			}
 			if !dryRun {
-				client.DeleteObjects(delete_input)
+				_, err := client.DeleteObjects(delete_input)
+				if err != nil {
+					log.Fatal("Could not delete versions: ", err)
+				}
 			}
 
 			return lastPage
