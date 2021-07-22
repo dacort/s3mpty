@@ -50,12 +50,12 @@ func main() {
 	sess := s3mpty.NewSession()
 	client := s3mpty.NewClient(sess, bucket_name)
 
-	deleted_objects := s3mpty.DeleteObjectsFromBucket(client, bucket_name, dryRun)
+	// deleted_objects := s3mpty.DeleteObjectsFromBucket(client, bucket_name, dryRun)
 	deleted_versions := s3mpty.DeleteVersionsFromBucket(client, bucket_name, dryRun)
 
 	if dryRun {
-		fmt.Println("(dryrun) Deleted", deleted_objects, "objects and", deleted_versions, "versions.")
+		fmt.Println("(dryrun) Deleted", deleted_versions, "versions.")
 	} else {
-		fmt.Println("Deleted", deleted_objects, "objects and", deleted_versions, "versions.")
+		fmt.Println("Deleted", deleted_versions, "versions.")
 	}
 }

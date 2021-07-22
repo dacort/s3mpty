@@ -28,7 +28,13 @@ func getBucketRegion(svc *s3.S3, bucket_name string) string {
 			log.Fatal(err.Error())
 		}
 	}
-	return *result.LocationConstraint
+
+	if result.LocationConstraint == nil {
+		return "us-east-1"
+	} else {
+		return *result.LocationConstraint
+	}
+
 }
 
 func NewSession() *session.Session {
@@ -115,7 +121,15 @@ func DeleteVersionsFromBucket(client *s3.S3, bucket_name string, dryRun bool) in
 			version_counter += len(page.DeleteMarkers)
 			for _, obj := range page.DeleteMarkers {
 				if dryRun {
-					fmt.Printf("(dryrun) delete version: s3://%s%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+					fmt.Printf("(dryrun) delete marker: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+				} else {
+					delete_input.Delete.Objects = append(delete_input.Delete.Objects, &s3.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
+				}
+			}
+			version_counter += len(page.Versions)
+			for _, obj := range page.Versions {
+				if dryRun {
+					fmt.Printf("(dryrun) delete version: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
 				} else {
 					delete_input.Delete.Objects = append(delete_input.Delete.Objects, &s3.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
 				}
