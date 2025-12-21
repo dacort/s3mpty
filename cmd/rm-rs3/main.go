@@ -12,16 +12,20 @@ const (
 	defaultDryRun = false
 )
 
-var dryRun bool
+var (
+	dryRun bool
+	prefix string
+)
 
 func init() {
 	const (
 		defaultDryRun = false
 	)
 	flag.BoolVar(&dryRun, "dryrun", defaultDryRun, "Display the operations that would be performed without actually running them.")
+	flag.StringVar(&prefix, "prefix", "", "Only delete objects with the specified prefix.")
 
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-dryrun] <bucket_name>\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-dryrun] [-prefix <prefix>] <bucket_name>\n", os.Args[0])
 
 		flag.PrintDefaults()
 	}
@@ -50,12 +54,20 @@ func main() {
 	sess := s3mpty.NewSession()
 	client := s3mpty.NewClient(sess, bucket_name)
 
-	// deleted_objects := s3mpty.DeleteObjectsFromBucket(client, bucket_name, dryRun)
-	deleted_versions := s3mpty.DeleteVersionsFromBucket(client, bucket_name, dryRun)
+	// deleted_objects := s3mpty.DeleteObjectsFromBucket(client, bucket_name, prefix, dryRun)
+	deleted_versions := s3mpty.DeleteVersionsFromBucket(client, bucket_name, prefix, dryRun)
 
 	if dryRun {
-		fmt.Println("(dryrun) Deleted", deleted_versions, "versions.")
+		if prefix != "" {
+			fmt.Printf("(dryrun) Deleted %d versions with prefix '%s'.\n", deleted_versions, prefix)
+		} else {
+			fmt.Println("(dryrun) Deleted", deleted_versions, "versions.")
+		}
 	} else {
-		fmt.Println("Deleted", deleted_versions, "versions.")
+		if prefix != "" {
+			fmt.Printf("Deleted %d versions with prefix '%s'.\n", deleted_versions, prefix)
+		} else {
+			fmt.Println("Deleted", deleted_versions, "versions.")
+		}
 	}
 }

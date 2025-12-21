@@ -15,11 +15,14 @@ var testBucketName = "somebucket"
 // Define a mock struct to be used in your unit tests of myFunc.
 type mockS3Client struct {
 	s3iface.S3API
-	CallCount int
+	CallCount        int
+	LastVersionInput *s3.ListObjectVersionsInput
+	LastObjectInput  *s3.ListObjectsV2Input
 }
 
 func (m *mockS3Client) ListObjectsV2Pages(input *s3.ListObjectsV2Input, fn func(*s3.ListObjectsV2Output, bool) bool) error {
 	m.CallCount++
+	m.LastObjectInput = input
 
 	keycount := int64(5)
 	output := s3.ListObjectsV2Output{
@@ -39,6 +42,7 @@ func (m *mockS3Client) ListObjectsV2Pages(input *s3.ListObjectsV2Input, fn func(
 
 func (m *mockS3Client) ListObjectVersionsPages(input *s3.ListObjectVersionsInput, fn func(*s3.ListObjectVersionsOutput, bool) bool) error {
 	m.CallCount++
+	m.LastVersionInput = input
 
 	output := s3.ListObjectVersionsOutput{
 		DeleteMarkers: []*s3.DeleteMarkerEntry{
@@ -70,7 +74,7 @@ func TestDeleteObjectsFromBucketDryRun(t *testing.T) {
 	mockSvc := &mockS3Client{}
 
 	// Verify DeleteObjectsFromBucket's functionality with a dry run
-	count := DeleteObjectsFromBucket(mockSvc, testBucketName, true)
+	count := DeleteObjectsFromBucket(mockSvc, testBucketName, "", true)
 	if count != 5 {
 		t.Errorf("expect %v, got %v", 5, count)
 	}
@@ -85,7 +89,7 @@ func TestDeleteObjectsFromBucket(t *testing.T) {
 	mockSvc := &mockS3Client{}
 
 	// Verify myFunc's functionality
-	count := DeleteObjectsFromBucket(mockSvc, testBucketName, false)
+	count := DeleteObjectsFromBucket(mockSvc, testBucketName, "", false)
 	if count != 5 {
 		t.Errorf("expect %v, got %v", 5, count)
 	}
@@ -100,7 +104,7 @@ func TestDeleteVersionsFromBucketDryRun(t *testing.T) {
 	mockSvc := &mockS3Client{}
 
 	// Verify myFunc's functionality
-	count := DeleteVersionsFromBucket(mockSvc, testBucketName, true)
+	count := DeleteVersionsFromBucket(mockSvc, testBucketName, "", true)
 	if count != 3 {
 		t.Errorf("expect %v, got %v", 3, count)
 	}
@@ -114,12 +118,52 @@ func TestDeleteVersionsFromBucket(t *testing.T) {
 	mockSvc := &mockS3Client{}
 
 	// Verify myFunc's functionality
-	count := DeleteVersionsFromBucket(mockSvc, testBucketName, false)
+	count := DeleteVersionsFromBucket(mockSvc, testBucketName, "", false)
 	if count != 3 {
 		t.Errorf("expect %v, got %v", 3, count)
 	}
 
 	if mockSvc.CallCount != 2 {
 		t.Errorf("expected 2 call to S3, got %v", mockSvc.CallCount)
+	}
+}
+
+func TestDeleteVersionsFromBucketWithPrefix(t *testing.T) {
+	// Setup Test
+	mockSvc := &mockS3Client{}
+	testPrefix := "some-prefix/"
+
+	// Verify that prefix is passed to ListObjectVersionsInput
+	count := DeleteVersionsFromBucket(mockSvc, testBucketName, testPrefix, true)
+	if count != 3 {
+		t.Errorf("expect %v, got %v", 3, count)
+	}
+
+	if mockSvc.LastVersionInput == nil {
+		t.Error("expected LastVersionInput to be set")
+	} else if mockSvc.LastVersionInput.Prefix == nil {
+		t.Error("expected Prefix to be set in ListObjectVersionsInput")
+	} else if *mockSvc.LastVersionInput.Prefix != testPrefix {
+		t.Errorf("expected prefix to be %v, got %v", testPrefix, *mockSvc.LastVersionInput.Prefix)
+	}
+}
+
+func TestDeleteObjectsFromBucketWithPrefix(t *testing.T) {
+	// Setup Test
+	mockSvc := &mockS3Client{}
+	testPrefix := "another-prefix/"
+
+	// Verify that prefix is passed to ListObjectsV2Input
+	count := DeleteObjectsFromBucket(mockSvc, testBucketName, testPrefix, true)
+	if count != 5 {
+		t.Errorf("expect %v, got %v", 5, count)
+	}
+
+	if mockSvc.LastObjectInput == nil {
+		t.Error("expected LastObjectInput to be set")
+	} else if mockSvc.LastObjectInput.Prefix == nil {
+		t.Error("expected Prefix to be set in ListObjectsV2Input")
+	} else if *mockSvc.LastObjectInput.Prefix != testPrefix {
+		t.Errorf("expected prefix to be %v, got %v", testPrefix, *mockSvc.LastObjectInput.Prefix)
 	}
 }

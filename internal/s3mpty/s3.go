@@ -59,9 +59,13 @@ func NewClient(sess *session.Session, bucket_name string) *s3.S3 {
 	return svc
 }
 
-func DeleteObjectsFromBucket(client s3iface.S3API, bucket_name string, dryRun bool) int {
+func DeleteObjectsFromBucket(client s3iface.S3API, bucket_name string, prefix string, dryRun bool) int {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket_name),
+	}
+	
+	if prefix != "" {
+		input.Prefix = aws.String(prefix)
 	}
 
 	counter := 0
@@ -109,9 +113,13 @@ func DeleteObjectsFromBucket(client s3iface.S3API, bucket_name string, dryRun bo
 	return counter
 }
 
-func DeleteVersionsFromBucket(client s3iface.S3API, bucket_name string, dryRun bool) int {
+func DeleteVersionsFromBucket(client s3iface.S3API, bucket_name string, prefix string, dryRun bool) int {
 	version_input := &s3.ListObjectVersionsInput{
 		Bucket: aws.String(bucket_name),
+	}
+	
+	if prefix != "" {
+		version_input.Prefix = aws.String(prefix)
 	}
 
 	version_counter := 0
