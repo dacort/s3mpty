@@ -1,65 +1,65 @@
 package s3mpty
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
-func getBucketRegion(svc *s3.S3, bucket_name string) string {
+// S3API defines the interface for S3 operations we use
+type S3API interface {
+	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+	ListObjectVersions(ctx context.Context, params *s3.ListObjectVersionsInput, optFns ...func(*s3.Options)) (*s3.ListObjectVersionsOutput, error)
+	DeleteObjects(ctx context.Context, params *s3.DeleteObjectsInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
+}
+
+func getBucketRegion(ctx context.Context, svc *s3.Client, bucket_name string) string {
 	input := &s3.GetBucketLocationInput{
 		Bucket: aws.String(bucket_name),
 	}
 
-	result, err := svc.GetBucketLocation(input)
+	result, err := svc.GetBucketLocation(ctx, input)
 	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			default:
-				log.Fatal(aerr.Error())
-			}
-		} else {
-			// Print the error, cast err to awserr.Error to get the Code and
-			// Message from an error.
-			log.Fatal(err.Error())
-		}
+		log.Fatal("Error getting bucket location: ", err)
 	}
 
-	if result.LocationConstraint == nil {
+	if result.LocationConstraint == "" {
 		return "us-east-1"
 	} else {
-		return *result.LocationConstraint
+		return string(result.LocationConstraint)
 	}
 
 }
 
-func NewSession() *session.Session {
-	// We use SharedConfigState so we can make use of credential_process
-	// Note: This is potentially unsafe
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	_, err := sess.Config.Credentials.Get()
+func NewConfig(ctx context.Context) aws.Config {
+	// LoadDefaultConfig automatically loads credentials from environment,
+	// shared config file, and other standard credential sources
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		// handle error
-		log.Fatal("Could not load credentials: ", err)
+		log.Fatal("Could not load AWS config: ", err)
 	}
 
-	return sess
+	return cfg
 }
 
-func NewClient(sess *session.Session, bucket_name string) *s3.S3 {
-	region_name := aws.String(getBucketRegion(s3.New(sess), bucket_name))
-	svc := s3.New(sess, aws.NewConfig().WithRegion(*region_name))
+func NewClient(ctx context.Context, cfg aws.Config, bucket_name string) *s3.Client {
+	// Get the region for the bucket
+	tempClient := s3.NewFromConfig(cfg)
+	region_name := getBucketRegion(ctx, tempClient, bucket_name)
+	
+	// Create a new client with the correct region
+	cfg.Region = region_name
+	svc := s3.NewFromConfig(cfg)
 	return svc
 }
 
-func DeleteObjectsFromBucket(client s3iface.S3API, bucket_name string, prefix string, dryRun bool) int {
+func DeleteObjectsFromBucket(ctx context.Context, client S3API, bucket_name string, prefix string, dryRun bool) int {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket_name),
 	}
@@ -69,51 +69,52 @@ func DeleteObjectsFromBucket(client s3iface.S3API, bucket_name string, prefix st
 	}
 
 	counter := 0
-	err := client.ListObjectsV2Pages(input,
-		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
-			counter += int(*page.KeyCount)
-
-			delete_input := &s3.DeleteObjectsInput{
-				Bucket: aws.String(bucket_name),
-				Delete: &s3.Delete{Objects: []*s3.ObjectIdentifier{}},
+	var continuationToken *string
+	
+	for {
+		input.ContinuationToken = continuationToken
+		page, err := client.ListObjectsV2(ctx, input)
+		if err != nil {
+			var noBucket *types.NoSuchBucket
+			if errors.As(err, &noBucket) {
+				fmt.Println("Bucket does not exist:", bucket_name)
+			} else {
+				fmt.Println("Error listing objects:", err)
 			}
-			for _, obj := range page.Contents {
-				if dryRun {
-					fmt.Printf("(dryrun) delete: s3://%s/%s\n", bucket_name, *obj.Key)
-				} else {
-					delete_input.Delete.Objects = append(delete_input.Delete.Objects, &s3.ObjectIdentifier{Key: obj.Key})
-				}
-
-			}
-			if !dryRun {
-				_, err := client.DeleteObjects(delete_input)
-				if err != nil {
-					log.Fatal("Could not delete objects: ", err)
-				}
-			}
-
-			return lastPage
-		})
-
-	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case s3.ErrCodeNoSuchBucket:
-				fmt.Println(s3.ErrCodeNoSuchBucket, aerr.Error())
-			default:
-				fmt.Println(aerr.Error())
-			}
-		} else {
-			// Print the error, cast err to awserr.Error to get the Code and
-			// Message from an error.
-			fmt.Println(err.Error())
+			break
 		}
+
+		counter += int(*page.KeyCount)
+
+		delete_input := &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucket_name),
+			Delete: &types.Delete{Objects: []types.ObjectIdentifier{}},
+		}
+		for _, obj := range page.Contents {
+			if dryRun {
+				fmt.Printf("(dryrun) delete: s3://%s/%s\n", bucket_name, *obj.Key)
+			} else {
+				delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key})
+			}
+
+		}
+		if !dryRun && len(delete_input.Delete.Objects) > 0 {
+			_, err := client.DeleteObjects(ctx, delete_input)
+			if err != nil {
+				log.Fatal("Could not delete objects: ", err)
+			}
+		}
+		
+		if !*page.IsTruncated {
+			break
+		}
+		continuationToken = page.NextContinuationToken
 	}
 
 	return counter
 }
 
-func DeleteVersionsFromBucket(client s3iface.S3API, bucket_name string, prefix string, dryRun bool) int {
+func DeleteVersionsFromBucket(ctx context.Context, client S3API, bucket_name string, prefix string, dryRun bool) int {
 	version_input := &s3.ListObjectVersionsInput{
 		Bucket: aws.String(bucket_name),
 	}
@@ -123,38 +124,51 @@ func DeleteVersionsFromBucket(client s3iface.S3API, bucket_name string, prefix s
 	}
 
 	version_counter := 0
-	client.ListObjectVersionsPages(version_input,
-		func(page *s3.ListObjectVersionsOutput, lastPage bool) bool {
+	var keyMarker *string
+	var versionIdMarker *string
+	
+	for {
+		version_input.KeyMarker = keyMarker
+		version_input.VersionIdMarker = versionIdMarker
+		
+		page, err := client.ListObjectVersions(ctx, version_input)
+		if err != nil {
+			log.Fatal("Could not list object versions: ", err)
+		}
 
-			delete_input := &s3.DeleteObjectsInput{
-				Bucket: aws.String(bucket_name),
-				Delete: &s3.Delete{Objects: []*s3.ObjectIdentifier{}},
+		delete_input := &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucket_name),
+			Delete: &types.Delete{Objects: []types.ObjectIdentifier{}},
+		}
+		version_counter += len(page.DeleteMarkers)
+		for _, obj := range page.DeleteMarkers {
+			if dryRun {
+				fmt.Printf("(dryrun) delete marker: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+			} else {
+				delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
 			}
-			version_counter += len(page.DeleteMarkers)
-			for _, obj := range page.DeleteMarkers {
-				if dryRun {
-					fmt.Printf("(dryrun) delete marker: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
-				} else {
-					delete_input.Delete.Objects = append(delete_input.Delete.Objects, &s3.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
-				}
+		}
+		version_counter += len(page.Versions)
+		for _, obj := range page.Versions {
+			if dryRun {
+				fmt.Printf("(dryrun) delete version: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+			} else {
+				delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
 			}
-			version_counter += len(page.Versions)
-			for _, obj := range page.Versions {
-				if dryRun {
-					fmt.Printf("(dryrun) delete version: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
-				} else {
-					delete_input.Delete.Objects = append(delete_input.Delete.Objects, &s3.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
-				}
+		}
+		if !dryRun && len(delete_input.Delete.Objects) > 0 {
+			_, err := client.DeleteObjects(ctx, delete_input)
+			if err != nil {
+				log.Fatal("Could not delete versions: ", err)
 			}
-			if !dryRun {
-				_, err := client.DeleteObjects(delete_input)
-				if err != nil {
-					log.Fatal("Could not delete versions: ", err)
-				}
-			}
-
-			return lastPage
-		})
+		}
+		
+		if !*page.IsTruncated {
+			break
+		}
+		keyMarker = page.NextKeyMarker
+		versionIdMarker = page.NextVersionIdMarker
+	}
 
 	return version_counter
 }

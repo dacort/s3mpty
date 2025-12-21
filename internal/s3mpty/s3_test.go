@@ -1,12 +1,13 @@
 package s3mpty_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	. "github.com/dacort/s3mpty/internal/s3mpty"
 )
 
@@ -14,20 +15,21 @@ var testBucketName = "somebucket"
 
 // Define a mock struct to be used in your unit tests of myFunc.
 type mockS3Client struct {
-	s3iface.S3API
 	CallCount        int
 	LastVersionInput *s3.ListObjectVersionsInput
 	LastObjectInput  *s3.ListObjectsV2Input
 }
 
-func (m *mockS3Client) ListObjectsV2Pages(input *s3.ListObjectsV2Input, fn func(*s3.ListObjectsV2Output, bool) bool) error {
+func (m *mockS3Client) ListObjectsV2(ctx context.Context, input *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
 	m.CallCount++
 	m.LastObjectInput = input
 
-	keycount := int64(5)
-	output := s3.ListObjectsV2Output{
-		KeyCount: &keycount,
-		Contents: []*s3.Object{
+	keycount := int32(5)
+	isTruncated := false
+	output := &s3.ListObjectsV2Output{
+		KeyCount:    aws.Int32(keycount),
+		IsTruncated: aws.Bool(isTruncated),
+		Contents: []types.Object{
 			{Key: aws.String("file1.txt")},
 			{Key: aws.String("file2.txt")},
 			{Key: aws.String("file3.txt")},
@@ -35,30 +37,30 @@ func (m *mockS3Client) ListObjectsV2Pages(input *s3.ListObjectsV2Input, fn func(
 			{Key: aws.String("file5.txt")},
 		},
 	}
-	fn(&output, true)
 
-	return nil
+	return output, nil
 }
 
-func (m *mockS3Client) ListObjectVersionsPages(input *s3.ListObjectVersionsInput, fn func(*s3.ListObjectVersionsOutput, bool) bool) error {
+func (m *mockS3Client) ListObjectVersions(ctx context.Context, input *s3.ListObjectVersionsInput, optFns ...func(*s3.Options)) (*s3.ListObjectVersionsOutput, error) {
 	m.CallCount++
 	m.LastVersionInput = input
 
-	output := s3.ListObjectVersionsOutput{
-		DeleteMarkers: []*s3.DeleteMarkerEntry{
+	isTruncated := false
+	output := &s3.ListObjectVersionsOutput{
+		IsTruncated: aws.Bool(isTruncated),
+		DeleteMarkers: []types.DeleteMarkerEntry{
 			{Key: aws.String("delete1.txt"), VersionId: aws.String("dv1")},
 		},
-		Versions: []*s3.ObjectVersion{
+		Versions: []types.ObjectVersion{
 			{Key: aws.String("file1.txt"), VersionId: aws.String("fv1")},
 			{Key: aws.String("file1.txt"), VersionId: aws.String("fv2")},
 		},
 	}
-	fn(&output, true)
 
-	return nil
+	return output, nil
 }
 
-func (m *mockS3Client) DeleteObjects(input *s3.DeleteObjectsInput) (*s3.DeleteObjectsOutput, error) {
+func (m *mockS3Client) DeleteObjects(ctx context.Context, input *s3.DeleteObjectsInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error) {
 	m.CallCount++
 
 	if *input.Bucket != testBucketName {
@@ -66,15 +68,16 @@ func (m *mockS3Client) DeleteObjects(input *s3.DeleteObjectsInput) (*s3.DeleteOb
 	}
 
 	// We don't actually use the response, so don't worry about it for now.
-	return nil, nil
+	return &s3.DeleteObjectsOutput{}, nil
 }
 
 func TestDeleteObjectsFromBucketDryRun(t *testing.T) {
 	// Setup Test
 	mockSvc := &mockS3Client{}
+	ctx := context.Background()
 
 	// Verify DeleteObjectsFromBucket's functionality with a dry run
-	count := DeleteObjectsFromBucket(mockSvc, testBucketName, "", true)
+	count := DeleteObjectsFromBucket(ctx, mockSvc, testBucketName, "", true)
 	if count != 5 {
 		t.Errorf("expect %v, got %v", 5, count)
 	}
@@ -87,9 +90,10 @@ func TestDeleteObjectsFromBucketDryRun(t *testing.T) {
 func TestDeleteObjectsFromBucket(t *testing.T) {
 	// Setup Test
 	mockSvc := &mockS3Client{}
+	ctx := context.Background()
 
 	// Verify myFunc's functionality
-	count := DeleteObjectsFromBucket(mockSvc, testBucketName, "", false)
+	count := DeleteObjectsFromBucket(ctx, mockSvc, testBucketName, "", false)
 	if count != 5 {
 		t.Errorf("expect %v, got %v", 5, count)
 	}
@@ -102,9 +106,10 @@ func TestDeleteObjectsFromBucket(t *testing.T) {
 func TestDeleteVersionsFromBucketDryRun(t *testing.T) {
 	// Setup Test
 	mockSvc := &mockS3Client{}
+	ctx := context.Background()
 
 	// Verify myFunc's functionality
-	count := DeleteVersionsFromBucket(mockSvc, testBucketName, "", true)
+	count := DeleteVersionsFromBucket(ctx, mockSvc, testBucketName, "", true)
 	if count != 3 {
 		t.Errorf("expect %v, got %v", 3, count)
 	}
@@ -116,9 +121,10 @@ func TestDeleteVersionsFromBucketDryRun(t *testing.T) {
 func TestDeleteVersionsFromBucket(t *testing.T) {
 	// Setup Test
 	mockSvc := &mockS3Client{}
+	ctx := context.Background()
 
 	// Verify myFunc's functionality
-	count := DeleteVersionsFromBucket(mockSvc, testBucketName, "", false)
+	count := DeleteVersionsFromBucket(ctx, mockSvc, testBucketName, "", false)
 	if count != 3 {
 		t.Errorf("expect %v, got %v", 3, count)
 	}
@@ -132,9 +138,10 @@ func TestDeleteVersionsFromBucketWithPrefix(t *testing.T) {
 	// Setup Test
 	mockSvc := &mockS3Client{}
 	testPrefix := "some-prefix/"
+	ctx := context.Background()
 
 	// Verify that prefix is passed to ListObjectVersionsInput
-	count := DeleteVersionsFromBucket(mockSvc, testBucketName, testPrefix, true)
+	count := DeleteVersionsFromBucket(ctx, mockSvc, testBucketName, testPrefix, true)
 	if count != 3 {
 		t.Errorf("expect %v, got %v", 3, count)
 	}
@@ -152,9 +159,10 @@ func TestDeleteObjectsFromBucketWithPrefix(t *testing.T) {
 	// Setup Test
 	mockSvc := &mockS3Client{}
 	testPrefix := "another-prefix/"
+	ctx := context.Background()
 
 	// Verify that prefix is passed to ListObjectsV2Input
-	count := DeleteObjectsFromBucket(mockSvc, testBucketName, testPrefix, true)
+	count := DeleteObjectsFromBucket(ctx, mockSvc, testBucketName, testPrefix, true)
 	if count != 5 {
 		t.Errorf("expect %v, got %v", 5, count)
 	}
