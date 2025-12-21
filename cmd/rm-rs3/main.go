@@ -18,9 +18,6 @@ var (
 )
 
 func init() {
-	const (
-		defaultDryRun = false
-	)
 	flag.BoolVar(&dryRun, "dryrun", defaultDryRun, "Display the operations that would be performed without actually running them.")
 	flag.StringVar(&prefix, "prefix", "", "Only delete objects with the specified prefix.")
 

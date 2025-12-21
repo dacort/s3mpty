@@ -63,7 +63,7 @@ func DeleteObjectsFromBucket(client s3iface.S3API, bucket_name string, prefix st
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket_name),
 	}
-	
+
 	if prefix != "" {
 		input.Prefix = aws.String(prefix)
 	}
@@ -117,7 +117,7 @@ func DeleteVersionsFromBucket(client s3iface.S3API, bucket_name string, prefix s
 	version_input := &s3.ListObjectVersionsInput{
 		Bucket: aws.String(bucket_name),
 	}
-	
+
 	if prefix != "" {
 		version_input.Prefix = aws.String(prefix)
 	}
