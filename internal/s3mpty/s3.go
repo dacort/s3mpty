@@ -84,7 +84,7 @@ func DeleteObjectsFromBucket(ctx context.Context, client S3API, bucket_name stri
 			break
 		}
 
-		counter += int(*page.KeyCount)
+		counter += int(aws.ToInt32(page.KeyCount))
 
 		delete_input := &s3.DeleteObjectsInput{
 			Bucket: aws.String(bucket_name),
@@ -105,7 +105,7 @@ func DeleteObjectsFromBucket(ctx context.Context, client S3API, bucket_name stri
 			}
 		}
 		
-		if !*page.IsTruncated {
+		if !aws.ToBool(page.IsTruncated) {
 			break
 		}
 		continuationToken = page.NextContinuationToken
@@ -163,7 +163,7 @@ func DeleteVersionsFromBucket(ctx context.Context, client S3API, bucket_name str
 			}
 		}
 		
-		if !*page.IsTruncated {
+		if !aws.ToBool(page.IsTruncated) {
 			break
 		}
 		keyMarker = page.NextKeyMarker
