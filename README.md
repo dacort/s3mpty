@@ -100,3 +100,20 @@ aws s3api list-object-versions \
 ```json
 { "Key": "file3.txt", "VersionId": "VcpJgApOJTcWbnREgXPP39aAdymJnXuz" }
 ```
+
+After building, you should now be able to delete/clean things up.
+
+```bash
+go build ./cmd/rm-rs3
+
+./rm-rs3 -dryrun somerandombucket-1234
+```
+
+```
+(dryrun) delete marker: s3://somerandombucket-1234/file3.txt#G.fsiV42AYVwZEDfUFYxIWj9bqwj4Vvv
+(dryrun) delete version: s3://somerandombucket-1234/file1.txt#.oHIC7wRcy5chRwsLafmcRcN8maKiwos
+(dryrun) delete version: s3://somerandombucket-1234/file1.txt#f_ImK5Pdyed1onjCe0XkOY6FOZJ0mFpS
+(dryrun) delete version: s3://somerandombucket-1234/file2.txt#BqpWsB1M1ocF_Wjk49trQseu4rVtVBhU
+(dryrun) delete version: s3://somerandombucket-1234/file3.txt#VcpJgApOJTcWbnREgXPP39aAdymJnXuz
+(dryrun) Deleted 5 versions.
+```
