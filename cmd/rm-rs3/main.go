@@ -54,17 +54,15 @@ func main() {
 	// deleted_objects := s3mpty.DeleteObjectsFromBucket(client, bucket_name, prefix, dryRun)
 	deleted_versions := s3mpty.DeleteVersionsFromBucket(client, bucket_name, prefix, dryRun)
 
+	// Construct the output message
+	dryRunPrefix := ""
 	if dryRun {
-		if prefix != "" {
-			fmt.Printf("(dryrun) Deleted %d versions with prefix '%s'.\n", deleted_versions, prefix)
-		} else {
-			fmt.Println("(dryrun) Deleted", deleted_versions, "versions.")
-		}
+		dryRunPrefix = "(dryrun) "
+	}
+	
+	if prefix != "" {
+		fmt.Printf("%sDeleted %d versions with prefix '%s'.\n", dryRunPrefix, deleted_versions, prefix)
 	} else {
-		if prefix != "" {
-			fmt.Printf("Deleted %d versions with prefix '%s'.\n", deleted_versions, prefix)
-		} else {
-			fmt.Println("Deleted", deleted_versions, "versions.")
-		}
+		fmt.Printf("%sDeleted %d versions.\n", dryRunPrefix, deleted_versions)
 	}
 }
