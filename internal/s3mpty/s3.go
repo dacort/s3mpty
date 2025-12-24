@@ -69,46 +69,85 @@ func DeleteObjectsFromBucket(ctx context.Context, client S3API, bucket_name stri
 	}
 
 	counter := 0
-	var continuationToken *string
 	
-	for {
-		input.ContinuationToken = continuationToken
-		page, err := client.ListObjectsV2(ctx, input)
-		if err != nil {
-			var noBucket *types.NoSuchBucket
-			if errors.As(err, &noBucket) {
-				fmt.Println("Bucket does not exist:", bucket_name)
-			} else {
-				fmt.Println("Error listing objects:", err)
-			}
-			break
-		}
-
-		counter += int(aws.ToInt32(page.KeyCount))
-
-		delete_input := &s3.DeleteObjectsInput{
-			Bucket: aws.String(bucket_name),
-			Delete: &types.Delete{Objects: []types.ObjectIdentifier{}},
-		}
-		for _, obj := range page.Contents {
-			if dryRun {
-				fmt.Printf("(dryrun) delete: s3://%s/%s\n", bucket_name, *obj.Key)
-			} else {
-				delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key})
-			}
-
-		}
-		if !dryRun && len(delete_input.Delete.Objects) > 0 {
-			_, err := client.DeleteObjects(ctx, delete_input)
-			if err != nil {
-				log.Fatal("Could not delete objects: ", err)
-			}
-		}
+	// Check if the client is a concrete *s3.Client to use paginator
+	if s3Client, ok := client.(*s3.Client); ok {
+		paginator := s3.NewListObjectsV2Paginator(s3Client, input)
 		
-		if !aws.ToBool(page.IsTruncated) {
-			break
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				var noBucket *types.NoSuchBucket
+				if errors.As(err, &noBucket) {
+					fmt.Println("Bucket does not exist:", bucket_name)
+				} else {
+					fmt.Println("Error listing objects:", err)
+				}
+				break
+			}
+
+			counter += int(aws.ToInt32(page.KeyCount))
+
+			delete_input := &s3.DeleteObjectsInput{
+				Bucket: aws.String(bucket_name),
+				Delete: &types.Delete{Objects: []types.ObjectIdentifier{}},
+			}
+			for _, obj := range page.Contents {
+				if dryRun {
+					fmt.Printf("(dryrun) delete: s3://%s/%s\n", bucket_name, *obj.Key)
+				} else {
+					delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key})
+				}
+			}
+			if !dryRun && len(delete_input.Delete.Objects) > 0 {
+				_, err := client.DeleteObjects(ctx, delete_input)
+				if err != nil {
+					log.Fatal("Could not delete objects: ", err)
+				}
+			}
 		}
-		continuationToken = page.NextContinuationToken
+	} else {
+		// Fallback to manual pagination for test mocks
+		var continuationToken *string
+		
+		for {
+			input.ContinuationToken = continuationToken
+			page, err := client.ListObjectsV2(ctx, input)
+			if err != nil {
+				var noBucket *types.NoSuchBucket
+				if errors.As(err, &noBucket) {
+					fmt.Println("Bucket does not exist:", bucket_name)
+				} else {
+					fmt.Println("Error listing objects:", err)
+				}
+				break
+			}
+
+			counter += int(aws.ToInt32(page.KeyCount))
+
+			delete_input := &s3.DeleteObjectsInput{
+				Bucket: aws.String(bucket_name),
+				Delete: &types.Delete{Objects: []types.ObjectIdentifier{}},
+			}
+			for _, obj := range page.Contents {
+				if dryRun {
+					fmt.Printf("(dryrun) delete: s3://%s/%s\n", bucket_name, *obj.Key)
+				} else {
+					delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key})
+				}
+			}
+			if !dryRun && len(delete_input.Delete.Objects) > 0 {
+				_, err := client.DeleteObjects(ctx, delete_input)
+				if err != nil {
+					log.Fatal("Could not delete objects: ", err)
+				}
+			}
+			
+			if !aws.ToBool(page.IsTruncated) {
+				break
+			}
+			continuationToken = page.NextContinuationToken
+		}
 	}
 
 	return counter
@@ -124,50 +163,91 @@ func DeleteVersionsFromBucket(ctx context.Context, client S3API, bucket_name str
 	}
 
 	version_counter := 0
-	var keyMarker *string
-	var versionIdMarker *string
 	
-	for {
-		version_input.KeyMarker = keyMarker
-		version_input.VersionIdMarker = versionIdMarker
+	// Check if the client is a concrete *s3.Client to use paginator
+	if s3Client, ok := client.(*s3.Client); ok {
+		paginator := s3.NewListObjectVersionsPaginator(s3Client, version_input)
 		
-		page, err := client.ListObjectVersions(ctx, version_input)
-		if err != nil {
-			log.Fatal("Could not list object versions: ", err)
-		}
-
-		delete_input := &s3.DeleteObjectsInput{
-			Bucket: aws.String(bucket_name),
-			Delete: &types.Delete{Objects: []types.ObjectIdentifier{}},
-		}
-		version_counter += len(page.DeleteMarkers)
-		for _, obj := range page.DeleteMarkers {
-			if dryRun {
-				fmt.Printf("(dryrun) delete marker: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
-			} else {
-				delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
-			}
-		}
-		version_counter += len(page.Versions)
-		for _, obj := range page.Versions {
-			if dryRun {
-				fmt.Printf("(dryrun) delete version: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
-			} else {
-				delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
-			}
-		}
-		if !dryRun && len(delete_input.Delete.Objects) > 0 {
-			_, err := client.DeleteObjects(ctx, delete_input)
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
 			if err != nil {
-				log.Fatal("Could not delete versions: ", err)
+				log.Fatal("Could not list object versions: ", err)
+			}
+
+			delete_input := &s3.DeleteObjectsInput{
+				Bucket: aws.String(bucket_name),
+				Delete: &types.Delete{Objects: []types.ObjectIdentifier{}},
+			}
+			version_counter += len(page.DeleteMarkers)
+			for _, obj := range page.DeleteMarkers {
+				if dryRun {
+					fmt.Printf("(dryrun) delete marker: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+				} else {
+					delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
+				}
+			}
+			version_counter += len(page.Versions)
+			for _, obj := range page.Versions {
+				if dryRun {
+					fmt.Printf("(dryrun) delete version: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+				} else {
+					delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
+				}
+			}
+			if !dryRun && len(delete_input.Delete.Objects) > 0 {
+				_, err := client.DeleteObjects(ctx, delete_input)
+				if err != nil {
+					log.Fatal("Could not delete versions: ", err)
+				}
 			}
 		}
+	} else {
+		// Fallback to manual pagination for test mocks
+		var keyMarker *string
+		var versionIdMarker *string
 		
-		if !aws.ToBool(page.IsTruncated) {
-			break
+		for {
+			version_input.KeyMarker = keyMarker
+			version_input.VersionIdMarker = versionIdMarker
+			
+			page, err := client.ListObjectVersions(ctx, version_input)
+			if err != nil {
+				log.Fatal("Could not list object versions: ", err)
+			}
+
+			delete_input := &s3.DeleteObjectsInput{
+				Bucket: aws.String(bucket_name),
+				Delete: &types.Delete{Objects: []types.ObjectIdentifier{}},
+			}
+			version_counter += len(page.DeleteMarkers)
+			for _, obj := range page.DeleteMarkers {
+				if dryRun {
+					fmt.Printf("(dryrun) delete marker: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+				} else {
+					delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
+				}
+			}
+			version_counter += len(page.Versions)
+			for _, obj := range page.Versions {
+				if dryRun {
+					fmt.Printf("(dryrun) delete version: s3://%s/%s#%s\n", bucket_name, *obj.Key, *obj.VersionId)
+				} else {
+					delete_input.Delete.Objects = append(delete_input.Delete.Objects, types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId})
+				}
+			}
+			if !dryRun && len(delete_input.Delete.Objects) > 0 {
+				_, err := client.DeleteObjects(ctx, delete_input)
+				if err != nil {
+					log.Fatal("Could not delete versions: ", err)
+				}
+			}
+			
+			if !aws.ToBool(page.IsTruncated) {
+				break
+			}
+			keyMarker = page.NextKeyMarker
+			versionIdMarker = page.NextVersionIdMarker
 		}
-		keyMarker = page.NextKeyMarker
-		versionIdMarker = page.NextVersionIdMarker
 	}
 
 	return version_counter
