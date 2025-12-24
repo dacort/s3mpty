@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -48,11 +49,12 @@ func main() {
 	flag.Parse()
 	bucket_name := checkArgs()
 
-	sess := s3mpty.NewSession()
-	client := s3mpty.NewClient(sess, bucket_name)
+	ctx := context.Background()
+	cfg := s3mpty.NewConfig(ctx)
+	client := s3mpty.NewClient(ctx, cfg, bucket_name)
 
-	// deleted_objects := s3mpty.DeleteObjectsFromBucket(client, bucket_name, prefix, dryRun)
-	deleted_versions := s3mpty.DeleteVersionsFromBucket(client, bucket_name, prefix, dryRun)
+	// deleted_objects := s3mpty.DeleteObjectsFromBucket(ctx, client, bucket_name, prefix, dryRun)
+	deleted_versions := s3mpty.DeleteVersionsFromBucket(ctx, client, bucket_name, prefix, dryRun)
 
 	// Construct the output message
 	dryRunPrefix := ""
